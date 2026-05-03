@@ -1,8 +1,8 @@
 [package]
-name = "ada"
+name = "unshroud"
 version = "0.1.0"
 edition = "2021"
-description = "Autonomous Diagnostic Agent for Unix/Linux"
+description = "autonomous diagnostic agent for Unix-like systems. It acts as a 'black box' for your services, automatically capturing forensic context when anomalies occur—so you never have to guess why a process crashed at 3 AM."
 license = "Apache-2.0"
 authors = ["omagalaktion@gmail.com"]
 

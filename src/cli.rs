@@ -2,13 +2,13 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "ada", about = "Autonomous Diagnostic Agent", version)]
+#[command(version, about)]
 pub struct Args {
     #[arg(
         short = 'c',
         long,
-        env = "ADA_CONFIG",
-        default_value = "/etc/ada/ada.toml",
+        env = "UNSHROUD_CONFIG",
+        default_value = "/etc/unshroud/unshroud.toml",
         value_name = "FILE"
     )]
     pub config: PathBuf,
