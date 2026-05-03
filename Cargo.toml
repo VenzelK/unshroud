@@ -1,0 +1,36 @@
+[package]
+name = "ada"
+version = "0.1.0"
+edition = "2021"
+description = "Autonomous Diagnostic Agent for Unix/Linux"
+license = "Apache-2.0"
+authors = ["omagalaktion@gmail.com"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.1"
+thiserror = "2.0"
+clap = { version = "4.4", features = ["derive", "env"] }
+
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+panic = "unwind"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"    
+overflow-checks = false
+
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
