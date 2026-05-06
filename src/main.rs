@@ -1,10 +1,12 @@
+#[allow(unused)]
 mod cli;
 mod config;
 mod core;
-
+mod plugins;
 
 use std::path::{Path, PathBuf};
 use config::load_config;
+use plugins::start_listener;
 
 fn main() {
     let args = cli::parse();
