@@ -1,5 +1,7 @@
 mod cli;
 mod config;
+mod core;
+
 
 use std::path::{Path, PathBuf};
 use config::load_config;
@@ -10,11 +12,7 @@ fn main() {
 
     match load_config(config_path.to_str().unwrap()) {
         Ok(cfg) => {
-            // 🟢 Dev-only: дамп загруженного конфига
-            if cfg!(debug_assertions) {
-                eprintln!("[config] loaded:\n{:#?}", cfg);
-            }
-            
+            if cfg!(debug_assertions) { eprintln!("[cli] parsed args:\n{:#?}", args)}
             // TODO: engine::run(cfg, args.dry_run);
         }
         Err(e) => {
