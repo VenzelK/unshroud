@@ -1,3 +1,7 @@
+/*
+* UDS
+*/
+
 use std::env;
 use std::fs;
 use std::os::unix::io::FromRawFd;
@@ -6,7 +10,6 @@ use std::sync::Arc;
 use tokio::net::UnixListener;
 use anyhow::Result;
 
-/// RAII-гвард: удаляет файл сокета при выходе из области видимости.
 struct SocketPathGuard(String);
 impl Drop for SocketPathGuard {
     fn drop(&mut self) {
@@ -14,21 +17,19 @@ impl Drop for SocketPathGuard {
     }
 }
 
-/// Пытается использовать systemd-socket, иначе падает на standalone-бинд.
 fn try_bind_listener(socket_path: &str) -> Result<(UnixListener, Option<SocketPathGuard>)> {
-    // Проверка socket activation (работает с systemd, launchd, openrc и др.)
+
     if let (Ok(pid_str), Ok(fds_str)) = (env::var("LISTEN_PID"), env::var("LISTEN_FDS")) {
         if let (Ok(pid), Ok(fds)) = (pid_str.parse::<u32>(), fds_str.parse::<u32>()) {
             if pid == std::process::id() && fds >= 1 {
-                // FD 3 — первый переданный сокет
+
                 let std_sock = unsafe { StdUnixListener::from_raw_fd(3) };
-                std_sock.set_nonblocking(true)?; // Tokio требует nonblocking
+                std_sock.set_nonblocking(true)?;
                 return Ok((UnixListener::from_std(std_sock)?, None));
             }
         }
     }
 
-    // Standalone fallback
     let _ = fs::remove_file(socket_path);
     let sock = UnixListener::bind(socket_path)?;
     Ok((sock, Some(SocketPathGuard(socket_path.to_string()))))
@@ -44,7 +45,7 @@ pub async fn start_listener(
     } else {
         eprintln!("[uds] listening on {}", socket_path);
     }
-    let _guard = guard; // Дропается при выходе из функции
+    let _guard = guard;
 
     loop {
         let (stream, addr) = listener.accept().await?;
@@ -85,7 +86,7 @@ mod tests {
     #[tokio::test]
     async fn test_standalone_bind_and_accept() {
         let path = tmp_path("standalone");
-        let path_clone = path.clone(); // 🔧 FIX: clone before move
+        let path_clone = path.clone();
         let sink = Arc::new(tokio::sync::Mutex::new(()));
         
         let task = tokio::spawn(async move {
@@ -107,7 +108,7 @@ mod tests {
         let path = tmp_path("rps");
         let count = Arc::new(AtomicUsize::new(0));
         let count_clone = count.clone();
-        let path_clone = path.clone(); // 🔧 FIX
+        let path_clone = path.clone();
 
         let listener_task = tokio::spawn(async move {
             let (listener, guard) = try_bind_listener(&path_clone).unwrap();
@@ -125,7 +126,7 @@ mod tests {
                         match reader.read_line(&mut line).await {
                             Ok(0) | Err(_) => break,
                             Ok(_) => {
-                                c.fetch_add(1, Ordering::Relaxed); // 🔧 FIX: wrapped in block
+                                c.fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
@@ -172,24 +173,21 @@ mod tests {
             let mut reader = BufReader::new(stream);
             let mut line = String::new();
             
-            // 🔧 FIX: Явно обрабатываем Ok(0) (EOF) и Err
             loop {
                 line.clear();
                 match reader.read_line(&mut line).await {
-                    Ok(0) => break, // Клиент закрыл/уронил сокет → EOF
-                    Ok(_) => {},    // Прочитали строку (если успела прийти)
-                    Err(_) => break, // Ошибка сети/сокета
+                    Ok(0) => break,
+                    Ok(_) => {},
+                    Err(_) => break,
                 }
             }
         });
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         
-        // Подключаемся и РЕЗКО рвём соединение
         let stream = UnixStream::connect(&path).await.unwrap();
         drop(stream);
 
-        // Теперь таска завершится мгновенно (через Ok(0) => break)
         let result = task.await;
         assert!(result.is_ok(), "Listener panicked or hung on connection drop");
     }
