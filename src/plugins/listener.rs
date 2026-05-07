@@ -7,8 +7,11 @@ use std::fs;
 use std::os::unix::io::FromRawFd;
 use std::os::unix::net::UnixListener as StdUnixListener;
 use std::sync::Arc;
-use tokio::net::UnixListener;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::BufReader;
+use tokio::net::{UnixListener, UnixStream};
 use anyhow::Result;
+use crate::core::state::SharedState;
 
 struct SocketPathGuard(String);
 impl Drop for SocketPathGuard {
@@ -37,7 +40,7 @@ fn try_bind_listener(socket_path: &str) -> Result<(UnixListener, Option<SocketPa
 
 pub async fn start_listener(
     socket_path: &str,
-    _sink: Arc<tokio::sync::Mutex<()>>,
+    state: SharedState,
 ) -> Result<()> {
     let (listener, guard) = try_bind_listener(socket_path)?;
     if guard.is_none() {
@@ -50,8 +53,36 @@ pub async fn start_listener(
     loop {
         let (stream, addr) = listener.accept().await?;
         eprintln!("[uds] new connection from {:?}", addr);
-        drop(stream);
+        
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = handle_client(stream, state_clone).await {
+                eprintln!("[uds] client error: {}", e);
+            }
+        });
     }
+}
+
+async fn handle_client(
+    stream: UnixStream,
+    state: SharedState,
+) -> anyhow::Result<()> {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::with_capacity(256);
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await? {
+            0 => break,
+            _ => {}
+        }
+
+        if let Ok(msg) = serde_json::from_str::<crate::plugins::protocol::PluginMessage>(&line) {
+            let mut guard = state.lock().unwrap();
+            msg.route(&mut guard);
+        }
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -65,6 +96,7 @@ mod tests {
     use std::time::{Duration, Instant};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
+    use crate::core::state::{CoreState, SharedState};
 
     fn tmp_path(suffix: &str) -> String {
         format!("/tmp/unshroud_test_{}_{}.sock", std::process::id(), suffix)
@@ -87,8 +119,10 @@ mod tests {
     async fn test_standalone_bind_and_accept() {
         let path = tmp_path("standalone");
         let path_clone = path.clone();
-        let sink = Arc::new(tokio::sync::Mutex::new(()));
-        
+        let sink: SharedState = Arc::new(std::sync::Mutex::new(
+            CoreState::new(1024, 256)
+        ));
+
         let task = tokio::spawn(async move {
             let _ = start_listener(&path_clone, sink).await;
         });

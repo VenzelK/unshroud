@@ -163,11 +163,11 @@ impl RingBuffer {
         let mut result = Vec::with_capacity(self.count);
         if self.count == 0 { return result; }
 
-        let mut idx = self.head;
+        let mut idx = (self.head + self.capacity - self.count) % self.capacity;
+        
         for _ in 0..self.count {
-            if idx >= self.capacity { idx = 0; }
             result.push(self.storage[idx]);
-            idx += 1;
+            idx = (idx + 1) % self.capacity;
         }
         result
     }
