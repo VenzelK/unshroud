@@ -56,7 +56,7 @@ impl EventBuffer {
         self.storage.push_back(event.into());
     }
 
-    pub fn drain(&self) -> Vec<&str> {
-        self.storage.iter().map(|s| s.as_ref()).collect()
+    pub fn drain(&self) -> Vec<String> {
+        self.storage.iter().map(|s| s.to_string()).collect()
     }
 }

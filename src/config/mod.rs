@@ -1,5 +1,4 @@
-mod types;
 mod loader;
 
-pub use types::{Lifecycle};
+pub mod types;
 pub use loader::{load_config};

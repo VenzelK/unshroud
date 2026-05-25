@@ -159,22 +159,24 @@ impl RingBuffer {
     #[inline]
     pub fn base_time(&self) -> u64 { self.base_time }
 
-    pub fn drain(&self) -> Vec<MetricPoint> {
+    pub fn drain(&mut self) -> Vec<MetricPoint> {
         let mut result = Vec::with_capacity(self.count);
         if self.count == 0 { return result; }
-
-        let mut idx = (self.head + self.capacity - self.count) % self.capacity;
         
+        let mut idx = (self.head + self.capacity - self.count) % self.capacity;
         for _ in 0..self.count {
             result.push(self.storage[idx]);
             idx = (idx + 1) % self.capacity;
         }
+        
+        // 🔧 FIX: Actually clear the buffer state
+        self.count = 0;
+        self.head = 0;
+        
         result
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-}
+    use super::*;}
