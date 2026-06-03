@@ -1,3 +1,5 @@
+#[allow(unused)]
+
 mod cli;
 mod config;
 mod core;
@@ -94,7 +96,7 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
 }
 
 #[cfg(test)]
-mod tests {
+    mod tests {
     use super::*;
     use crate::config::types::{Config, CoreConfig, ModuleConfig, Lifecycle};
     use std::collections::HashMap;
@@ -182,4 +184,4 @@ mod tests {
         assert_eq!(cpu_trigger.unwrap().threshold, 0.95);
         assert_eq!(cpu_trigger.unwrap().cooldown, Duration::from_secs(60));
     }
-}
+    }
