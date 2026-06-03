@@ -20,8 +20,28 @@ use crate::core::engine::{Engine, EngineConfig};
 use crate::core::triggers::{Operator, Trigger};
 use crate::plugins::protocol::hash_metric_id;
 
+
+use metrics_exporter_prometheus::PrometheusBuilder;
+
+use metrics::{counter, gauge};
+use metrics_process::Collector;
+
 #[tokio::main]
 async fn main() -> ExitCode {
+
+    PrometheusBuilder::new()
+        .install()
+        .expect("failed to install Prometheus recorder");
+    counter!("unshroud_startup_total").increment(1);
+    gauge!("unshroud_build_info", "version" => "0.1.0").set(1.0);
+
+    let collector = Collector::default();
+    collector.describe();
+    tokio::spawn(async move {
+        loop { collector.collect(); tokio::time::sleep(std::time::Duration::from_secs(1)).await; }
+    });
+
+
     if let Err(e) = run().await {
         eprintln!("error: {}", e);
         return ExitCode::FAILURE;
