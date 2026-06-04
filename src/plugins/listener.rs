@@ -33,6 +33,9 @@ fn try_bind_listener(socket_path: &str) -> Result<(UnixListener, Option<SocketPa
         }
     }
 
+    eprintln!("[uds] 🔌 Socket bound: {}", socket_path);
+
+
     let _ = fs::remove_file(socket_path);
     let sock = UnixListener::bind(socket_path)?;
     Ok((sock, Some(SocketPathGuard(socket_path.to_string()))))

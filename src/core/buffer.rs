@@ -169,7 +169,6 @@ impl RingBuffer {
             idx = (idx + 1) % self.capacity;
         }
         
-        // 🔧 FIX: Actually clear the buffer state
         self.count = 0;
         self.head = 0;
         

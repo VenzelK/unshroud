@@ -7,7 +7,6 @@ use tokio::time::interval;
 use crate::core::state::{CoreState, SharedState};
 use crate::core::triggers::{Trigger, TriggerEngine, TriggerAction};
 use crate::storage::bundle::BundleBuilder;
-use crate::plugins::protocol::hash_metric_id;
 
 pub struct EngineConfig {
     pub poll_interval_ms: u64,
@@ -16,6 +15,7 @@ pub struct EngineConfig {
     pub output_dir: PathBuf,
     pub triggers: Vec<Trigger>,
     pub socket_path: String,
+    pub lua_triggers_dir: PathBuf,
 }
 
 pub struct Engine {
@@ -23,36 +23,45 @@ pub struct Engine {
     triggers: TriggerEngine,
     bundle: BundleBuilder,
     poll_interval: Duration,
+    socket_path: String,
 }
 
 impl Engine {
-    pub fn new(cfg: EngineConfig) -> Self {
+    pub fn new(cfg: EngineConfig) -> Result<Self, anyhow::Error> {
         let state = Arc::new(std::sync::Mutex::new(
             CoreState::new(cfg.buffer_capacity, cfg.event_capacity)
         ));
-        Self {
+        Ok(Self {
             state: state.clone(),
-            triggers: TriggerEngine::new(cfg.triggers),
+            triggers: TriggerEngine::new(cfg.triggers, &cfg.lua_triggers_dir)
+                .map_err(|e| anyhow::anyhow!("Trigger init error: {}", e))?,
             bundle: BundleBuilder::new(&cfg.output_dir),
             poll_interval: Duration::from_millis(cfg.poll_interval_ms),
-        }
+            socket_path: cfg.socket_path
+        })
     }
 
-    pub fn for_test(state: SharedState, triggers: Vec<Trigger>, output_dir: &PathBuf) -> Self {
-        Self {
+    pub fn for_test(state: SharedState, triggers: Vec<Trigger>, output_dir: &PathBuf) -> Result<Self, anyhow::Error> {
+        let dummy_lua_dir = PathBuf::new();
+        Ok(Self {
             state,
-            triggers: TriggerEngine::new(triggers),
+            triggers: TriggerEngine::new(triggers, &dummy_lua_dir)
+                .map_err(|e| anyhow::anyhow!("Trigger init error: {}", e))?,
             bundle: BundleBuilder::new(output_dir),
             poll_interval: Duration::from_millis(100),
-        }
+            socket_path: "/tmp/test.sock".to_string(),
+        })
     }
 
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut ticker = interval(self.poll_interval);
         let state_clone = self.state.clone();
 
+        let socket_path = self.socket_path.clone();
+
+
         let listener_task = tokio::spawn(async move {
-            crate::plugins::start_listener("/tmp/unshroud.sock", state_clone).await
+            crate::plugins::start_listener(&socket_path, state_clone).await
         });
 
         let collector_state = self.state.clone();
@@ -85,7 +94,7 @@ impl Engine {
 
         for point in &metrics {
             if let Some(value) = point.as_float() {
-                if let Some(action) = self.triggers.check(point.metric_id, value) {
+                if let Some(action) = self.triggers.check(point.metric_id, value, point.timestamp) {
                     self.handle_trigger(action, &metrics).await;
                 }
             }
@@ -109,6 +118,7 @@ mod tests {
     use super::*;
     use crate::core::buffer::MetricPoint;
     use crate::core::triggers::Operator;
+    use crate::plugins::protocol::hash_metric_id;
     use std::fs;
 
     fn test_output_dir() -> PathBuf {
@@ -131,8 +141,9 @@ mod tests {
             output_dir: test_output_dir(),
             triggers: vec![],
             socket_path: "/tmp/test.sock".to_string(),
+            lua_triggers_dir: PathBuf::new(),               
         };
-        let engine = Engine::new(cfg);
+        let engine = Engine::new(cfg).unwrap();
         assert_eq!(engine.poll_interval, Duration::from_millis(100));
     }
 
@@ -144,7 +155,7 @@ mod tests {
         let output_dir = test_output_dir();
         fs::create_dir_all(&output_dir).unwrap();
 
-        let mut engine = Engine::for_test(state.clone(), vec![], &output_dir);
+        let mut engine = Engine::for_test(state.clone(), vec![], &output_dir).unwrap(); 
 
         {
             let mut guard = state.lock().unwrap();
@@ -166,14 +177,15 @@ mod tests {
         let output_dir = test_output_dir();
         fs::create_dir_all(&output_dir).unwrap();
 
-        let trigger = Trigger {
+        let trigger = Trigger {  // ← Добавь lua_script: None
             metric_id: hash_metric_id("cpu"),
             operator: Operator::Gt,
             threshold: 0.8,
+            lua_script: None,
             cooldown: Duration::from_millis(0),
         };
 
-        let mut engine = Engine::for_test(state.clone(), vec![trigger], &output_dir);
+        let mut engine = Engine::for_test(state.clone(), vec![trigger], &output_dir).unwrap();  // ← .unwrap()
 
         {
             let mut guard = state.lock().unwrap();
@@ -202,7 +214,7 @@ mod tests {
         let output_dir = test_output_dir();
         fs::create_dir_all(&output_dir).unwrap();
 
-        let engine = Engine::for_test(state.clone(), vec![], &output_dir);
+        let engine = Engine::for_test(state.clone(), vec![], &output_dir).unwrap();  // ← .unwrap()
 
         let metrics = vec![MetricPoint::new_float(0, 123, 42.0)];
         let action = TriggerAction {
@@ -235,10 +247,11 @@ mod tests {
             metric_id: hash_metric_id("mem"),
             operator: Operator::Lt,
             threshold: 0.2,
+            lua_script: None,
             cooldown: Duration::from_millis(50),
         };
 
-        let mut engine = Engine::for_test(state.clone(), vec![trigger], &output_dir);
+        let mut engine = Engine::for_test(state.clone(), vec![trigger], &output_dir).unwrap();  // ← .unwrap()
 
         {
             let mut guard = state.lock().unwrap();

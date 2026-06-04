@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::Parser;
-use tokio::signal;
 
 use crate::cli::Args;
 use crate::config::load_config;
@@ -29,9 +28,12 @@ use metrics_process::Collector;
 #[tokio::main]
 async fn main() -> ExitCode {
 
+    eprintln!("[main] 🚀 unshroud daemon starting...");
+
     PrometheusBuilder::new()
+        .with_http_listener(([127, 0, 0, 1], 0))
         .install()
-        .expect("failed to install Prometheus recorder");
+        .expect("Prometheus recorder failed");
     counter!("unshroud_startup_total").increment(1);
     gauge!("unshroud_build_info", "version" => "0.1.0").set(1.0);
 
@@ -50,6 +52,8 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> anyhow::Result<()> {
+    eprintln!("[run] 📥 entering run()");
+
     let args = Args::parse();
     let config_path = resolve_absolute(&args.config);
 
@@ -64,22 +68,18 @@ async fn run() -> anyhow::Result<()> {
         event_capacity: 256,
         output_dir: cfg.core.output_dir,
         triggers,
-        socket_path: "/run/unshroud/unshroud.sock".to_string(),
+        socket_path: cfg.core.socket_path.into(),
+        lua_triggers_dir: cfg.core.lua_triggers_dir.clone(),
     };
 
-    let mut engine = Engine::new(engine_cfg);
+    
+    let mut engine = Engine::new(engine_cfg)
+        .context("Failed to initialize engine")?;
 
-    tokio::select! {
-        result = engine.run() => {
-            result.map_err(|e| anyhow::anyhow!("engine runtime error: {}", e))?;
-        }
-        _ = signal::ctrl_c() => {
-            eprintln!("[main] received SIGINT, shutting down");
-        }
-    }
+    let _ = engine.run().await;
 
     Ok(())
-}
+    }
 
 fn resolve_absolute(path: &PathBuf) -> PathBuf {
     if path.is_absolute() {
@@ -100,6 +100,7 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
                 metric_id: hash_metric_id(&format!("plugin.{}.alive", name)),
                 operator: Operator::Eq,
                 threshold: 1.0,
+                lua_script: None,
                 cooldown: Duration::from_secs(30),
             });
         }
@@ -109,9 +110,9 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
         metric_id: hash_metric_id("internal.cpu.usage"),
         operator: Operator::Gt,
         threshold: 0.95,
+        lua_script: None,  // ← добавь это
         cooldown: Duration::from_secs(60),
     });
-
     triggers
 }
 
@@ -140,11 +141,13 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
     fn test_build_triggers_from_empty_config() {
         let cfg = Config {
             core: CoreConfig {
-                poll_interval_ms: 1000,
-                buffer_capacity: 1024,
-                output_dir: PathBuf::from("/tmp"),
-            },
-            modules: HashMap::new(),
+            poll_interval_ms: 1000,
+            buffer_capacity: 1024,
+            output_dir: PathBuf::from("/tmp"),
+            lua_triggers_dir: PathBuf::new(),
+            socket_path: "/tmp/test.sock".to_string(),
+        },
+        modules: HashMap::new(),
         };
         let triggers = build_triggers_from_config(&cfg);
         assert_eq!(triggers.len(), 1);
@@ -176,6 +179,8 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
                 poll_interval_ms: 1000,
                 buffer_capacity: 1024,
                 output_dir: PathBuf::from("/tmp"),
+                lua_triggers_dir: PathBuf::new(),
+                socket_path: "/tmp/test.sock".to_string(),
             },
             modules,
         };
@@ -195,6 +200,8 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
                 poll_interval_ms: 1000,
                 buffer_capacity: 1024,
                 output_dir: PathBuf::from("/tmp"),
+                lua_triggers_dir: PathBuf::new(),
+                socket_path: "/tmp/test.sock".to_string(),
             },
             modules: HashMap::new(),
         };

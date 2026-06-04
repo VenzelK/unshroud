@@ -13,12 +13,14 @@ pub struct Config {
 pub struct CoreConfig {
     #[serde(default = "defaults::poll_interval_ms")]
     pub poll_interval_ms: u64,
-
     #[serde(default = "defaults::buffer_capacity")]
     pub buffer_capacity: usize,
-
     #[serde(default = "defaults::output_dir")]
     pub output_dir: PathBuf,
+    #[serde(default = "defaults::lua_triggers_dir")]
+    pub lua_triggers_dir: PathBuf,
+    #[serde(default = "defaults::socket_path")]
+    pub socket_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,8 +45,12 @@ mod defaults {
     use std::path::PathBuf;
     pub fn poll_interval_ms() -> u64 { 1000 }
     pub fn buffer_capacity() -> usize { 1024 }
-    pub fn output_dir() -> PathBuf { PathBuf::from("/var/lib/ada") }
+    pub fn output_dir() -> PathBuf { PathBuf::from("/var/lib/unshroud") }
     pub fn memory_limit_mb() -> u64 { 64 }
+    pub fn lua_triggers_dir() -> PathBuf {
+        PathBuf::from("/etc/unshroud/triggers")
+    }
+    pub fn socket_path() -> String { "/tmp/unshroud.sock".to_string() }
 }
 
 impl Default for Lifecycle {
