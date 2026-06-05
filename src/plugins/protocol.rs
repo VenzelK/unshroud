@@ -17,6 +17,7 @@ impl PluginMessage {
             Self::Event(e)    => e.process(state),
             Self::Heartbeat(h) => h.process(state),
         }
+        metrics::counter!("unshroud_messages_processed_total", "type" => "metric").increment(1);
     }
 }
 

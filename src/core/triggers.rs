@@ -122,6 +122,7 @@ impl TriggerEngine {
                     if now.duration_since(last) < t.cooldown { continue; }
                 }
                 self.last_fired.insert(t.metric_id, now);
+                metrics::counter!("unshroud_triggers_fired_total", "metric" => t.metric_id.to_string()).increment(1);
                 return Some(TriggerAction { metric_id: trigger_key, value });
             }
         }

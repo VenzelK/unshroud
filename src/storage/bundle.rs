@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use crate::core::buffer::MetricPoint;
@@ -41,6 +41,8 @@ impl BundleBuilder {
             enc.write_all(b)?;
         }
 
+        metrics::counter!("unshroud_bundles_written_total").increment(1);
+        
         enc.finish()?.flush()?;
         fs::rename(&temp_path, &final_path)?;
         Ok(final_path)
