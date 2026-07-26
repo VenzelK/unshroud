@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH, Instant};
 use crate::core::buffer::RingBuffer;
@@ -7,19 +7,23 @@ pub struct CoreState {
     pub metrics: RingBuffer,
     pub events: EventBuffer,
     pub base_time: u64,
+    pub metric_names: HashMap<u32, String>,
     cached_offset: u32,
     last_tick: Instant,
 }
 
 impl CoreState {
-    pub fn new(metric_cap: usize, event_cap: usize) -> Self {
-        let base = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    pub fn new(metrics_capacity: usize, events_capacity: usize) -> Self {
         Self {
-            metrics: RingBuffer::new(metric_cap),
-            events: EventBuffer::new(event_cap),
-            base_time: base,
+            metrics: RingBuffer::new(metrics_capacity),
+            events: EventBuffer::new(events_capacity),
+            base_time: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             cached_offset: 0,
             last_tick: Instant::now(),
+            metric_names: HashMap::new(),
         }
     }
 

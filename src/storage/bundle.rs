@@ -1,8 +1,10 @@
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::fs;
+use std::fs::File;
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use crate::core::buffer::MetricPoint;
+use crate::debug_log;
 
 const _: () = assert!(std::mem::size_of::<MetricPoint>() == 24);
 
@@ -16,6 +18,8 @@ impl BundleBuilder {
     }
 
     pub fn dump(&self, metrics: &[MetricPoint], events: &[&str]) -> std::io::Result<PathBuf> {
+        let start = std::time::Instant::now();
+        
         let ts = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
@@ -27,24 +31,46 @@ impl BundleBuilder {
         let file = File::create(&temp_path)?;
         let mut enc = zstd::Encoder::new(BufWriter::new(file), 3)?;
 
-        enc.write_all(&(metrics.len() as u32).to_ne_bytes())?;
+        let mut raw_bytes = 0;
+
+        let mut write_count = |buf: &[u8]| -> std::io::Result<()> {
+            enc.write_all(buf)?;
+            raw_bytes += buf.len();
+            Ok(())
+        };
+
+        write_count(&(metrics.len() as u32).to_ne_bytes())?;
         for m in metrics {
-            let ptr = m as *const MetricPoint as *const u8;
-            let bytes = unsafe { std::slice::from_raw_parts(ptr, 24) };
-            enc.write_all(bytes)?;
+            let bytes = unsafe { std::slice::from_raw_parts(m as *const MetricPoint as *const u8, 24) };
+            write_count(bytes)?;
         }
 
-        enc.write_all(&(events.len() as u32).to_ne_bytes())?;
+        write_count(&(events.len() as u32).to_ne_bytes())?;
         for e in events {
             let b = e.as_bytes();
-            enc.write_all(&(b.len() as u32).to_ne_bytes())?;
-            enc.write_all(b)?;
+            write_count(&(b.len() as u32).to_ne_bytes())?;
+            write_count(b)?;
         }
 
-        metrics::counter!("unshroud_bundles_written_total").increment(1);
-        
-        enc.finish()?.flush()?;
+        let mut writer = enc.finish()?;
+        writer.flush()?;
+
+        let dump_ms = start.elapsed().as_secs_f64() * 1000.0;
+
         fs::rename(&temp_path, &final_path)?;
+
+        let compressed_bytes = fs::metadata(&final_path)?.len() as f64;
+
+        crate::metrics::storage::record_dump_duration(dump_ms);
+        crate::metrics::storage::record_raw_bytes(raw_bytes as u64);
+        crate::metrics::storage::record_compressed_bytes(compressed_bytes);
+        crate::metrics::storage::bundle_written();
+
+        debug_log!(
+            "Bundle dumped: raw={}B, compressed={}B, duration={:.2}ms",
+            raw_bytes, compressed_bytes, dump_ms
+        );
+
         Ok(final_path)
     }
 }

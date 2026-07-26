@@ -8,6 +8,9 @@ use crate::core::state::{CoreState, SharedState};
 use crate::core::triggers::{Trigger, TriggerEngine, TriggerAction};
 use crate::storage::bundle::BundleBuilder;
 
+use std::time::{Instant};
+use crate::{debug_log, error_log, info_log}; 
+
 pub struct EngineConfig {
     pub poll_interval_ms: u64,
     pub buffer_capacity: usize,
@@ -69,13 +72,29 @@ impl Engine {
             crate::plugins::run_cpu_collector(collector_state, 1000).await;
         });
 
+
+        crate::metrics::engine::engine_started();
+        info_log!("Engine starting (poll_interval={:?})", self.poll_interval);
+
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
+
+                    let cycle_start = Instant::now();
+
                     self.process_cycle().await;
+
+                    let cycle_ms = cycle_start.elapsed().as_secs_f64() * 1000.0;
+
+                    crate::metrics::engine::record_cycle_duration(cycle_ms);
+                    debug_log!("Engine cycle completed in {:.3}ms", cycle_ms);
+
                 }
                 _ = signal::ctrl_c() => {
-                    eprintln!("[engine] shutdown signal received");
+                    
+                    crate::metrics::engine::engine_shutdown();
+                    info_log!("Shutdown signal received");
+
                     break;
                 }
             }
@@ -83,18 +102,29 @@ impl Engine {
 
         listener_task.abort();
         collector_task.abort();
+
+        info_log!("Engine stopped gracefully");
+
         Ok(())
     }
 
     async fn process_cycle(&mut self) {
-        let metrics = {
+
+        let (metrics, names) = {
             let mut guard = self.state.lock().unwrap();
-            guard.metrics.drain()
+            let m = guard.metrics.drain();
+            let n = guard.metric_names.clone();
+            (m, n)
         };
 
         for point in &metrics {
             if let Some(value) = point.as_float() {
-                if let Some(action) = self.triggers.check(point.metric_id, value, point.timestamp) {
+
+                let metric_name = names.get(&point.metric_id)
+                    .map(|s| s.as_str())
+                    .unwrap_or("unknown");
+                
+                if let Some(action) = self.triggers.check(point.metric_id, metric_name, value, point.timestamp) {
                     self.handle_trigger(action, &metrics).await;
                 }
             }
@@ -103,12 +133,12 @@ impl Engine {
 
     async fn handle_trigger(&self, _action: TriggerAction, metrics: &[crate::core::buffer::MetricPoint]) {
         let events = {
-            let mut guard = self.state.lock().unwrap();
+            let guard = self.state.lock().unwrap();
             guard.events.drain()
         };
 
         if let Err(e) = self.bundle.dump(metrics, &events.iter().map(|s| s.as_str()).collect::<Vec<_>>()) {
-            eprintln!("[engine] bundle error: {}", e);
+            error_log!("[engine] bundle error: {}", e);
         }
     }
 }

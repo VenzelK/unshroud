@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use crate::core::state::CoreState;
+use crate::core::{buffer::MetricPoint, state::CoreState};
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -17,7 +17,8 @@ impl PluginMessage {
             Self::Event(e)    => e.process(state),
             Self::Heartbeat(h) => h.process(state),
         }
-        metrics::counter!("unshroud_messages_processed_total", "type" => "metric").increment(1);
+
+        crate::metrics::ingestion::message_processed("metric");
     }
 }
 
@@ -28,17 +29,14 @@ pub struct MetricPayload {
 }
 
 impl MetricPayload {
-    #[inline]
     pub fn process(self, state: &mut CoreState) {
-        if let Some(val) = self.value {
-            let now = state.current_offset();
-            let point = crate::core::buffer::MetricPoint::new_float(
-                now, 
-                hash_metric_id(&self.id), 
-                val
-            );
-            state.metrics.push(point);
-        }
+        let id = crate::plugins::protocol::hash_metric_id(&self.id);
+        state.metric_names.entry(id).or_insert(self.id);
+
+        let val = self.value.unwrap_or(0.0);
+        let offset = state.current_offset();
+
+        state.metrics.push(MetricPoint::new_float(offset, id, val));
     }
 }
 

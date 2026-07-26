@@ -6,12 +6,13 @@ use std::env;
 use std::fs;
 use std::os::unix::io::FromRawFd;
 use std::os::unix::net::UnixListener as StdUnixListener;
-use std::sync::Arc;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::net::{UnixListener, UnixStream};
 use anyhow::Result;
 use crate::core::state::SharedState;
+use crate::debug_log;
+use crate::warn_log;
 
 struct SocketPathGuard(String);
 impl Drop for SocketPathGuard {
@@ -33,7 +34,7 @@ fn try_bind_listener(socket_path: &str) -> Result<(UnixListener, Option<SocketPa
         }
     }
 
-    eprintln!("[uds] 🔌 Socket bound: {}", socket_path);
+    debug_log!("[uds] 🔌 Socket bound: {}", socket_path);
 
 
     let _ = fs::remove_file(socket_path);
@@ -47,20 +48,20 @@ pub async fn start_listener(
 ) -> Result<()> {
     let (listener, guard) = try_bind_listener(socket_path)?;
     if guard.is_none() {
-        eprintln!("[uds] using socket activation");
+        debug_log!("[uds] using socket activation");
     } else {
-        eprintln!("[uds] listening on {}", socket_path);
+        debug_log!("[uds] listening on {}", socket_path);
     }
     let _guard = guard;
 
     loop {
         let (stream, addr) = listener.accept().await?;
-        eprintln!("[uds] new connection from {:?}", addr);
+        debug_log!("[uds] new connection from {:?}", addr);
         
         let state_clone = state.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_client(stream, state_clone).await {
-                eprintln!("[uds] client error: {}", e);
+                warn_log!("[uds] client error: {}", e);
             }
         });
     }
@@ -100,6 +101,7 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
     use crate::core::state::{CoreState, SharedState};
+    use std::sync::Arc;
 
     fn tmp_path(suffix: &str) -> String {
         format!("/tmp/unshroud_test_{}_{}.sock", std::process::id(), suffix)

@@ -5,6 +5,8 @@ mod config;
 mod core;
 mod plugins;
 mod storage;
+mod logger;
+mod metrics;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -19,23 +21,23 @@ use crate::core::engine::{Engine, EngineConfig};
 use crate::core::triggers::{Operator, Trigger};
 use crate::plugins::protocol::hash_metric_id;
 
-
 use metrics_exporter_prometheus::PrometheusBuilder;
-
-use metrics::{counter, gauge};
 use metrics_process::Collector;
 
 #[tokio::main]
 async fn main() -> ExitCode {
 
-    eprintln!("[main] 🚀 unshroud daemon starting...");
+    logger::init();
 
     PrometheusBuilder::new()
-        .with_http_listener(([127, 0, 0, 1], 0))
-        .install()
-        .expect("Prometheus recorder failed");
-    counter!("unshroud_startup_total").increment(1);
-    gauge!("unshroud_build_info", "version" => "0.1.0").set(1.0);
+    .install()
+    .expect("Prometheus recorder failed");
+
+    crate::metrics::init();
+
+    info_log!("unshroud daemon starting (version {})", env!("CARGO_PKG_VERSION"));
+
+    metrics::runtime::set_build_info(env!("CARGO_PKG_VERSION"));
 
     let collector = Collector::default();
     collector.describe();
@@ -43,16 +45,15 @@ async fn main() -> ExitCode {
         loop { collector.collect(); tokio::time::sleep(std::time::Duration::from_secs(1)).await; }
     });
 
-
     if let Err(e) = run().await {
-        eprintln!("error: {}", e);
+        error_log!("startup FAILED: {}", e);
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
 }
 
 async fn run() -> anyhow::Result<()> {
-    eprintln!("[run] 📥 entering run()");
+    debug_log!("[run] entering run()");
 
     let args = Args::parse();
     let config_path = resolve_absolute(&args.config);
@@ -106,11 +107,12 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
         }
     }
 
+    // NOT IMPLEMENT YET
     triggers.push(Trigger {
         metric_id: hash_metric_id("internal.cpu.usage"),
         operator: Operator::Gt,
         threshold: 0.95,
-        lua_script: None,  // ← добавь это
+        lua_script: None,
         cooldown: Duration::from_secs(60),
     });
     triggers
@@ -211,4 +213,4 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
         assert_eq!(cpu_trigger.unwrap().threshold, 0.95);
         assert_eq!(cpu_trigger.unwrap().cooldown, Duration::from_secs(60));
     }
-    }
+}

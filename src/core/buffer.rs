@@ -175,7 +175,3 @@ impl RingBuffer {
         result
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;}
