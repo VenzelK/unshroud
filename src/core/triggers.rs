@@ -102,7 +102,7 @@ impl TriggerEngine {
             last_fired: HashMap::new(),
             lua,
             lua_cache,
-            metric_names: HashMap::new(), // ← ДОБАВЬ ЭТО
+            metric_names: HashMap::new(),
         })
     }
 
@@ -169,8 +169,8 @@ impl TriggerEngine {
             crate::metrics::triggers::record_eval_duration(eval_ms);
 
             debug_log!(
-                "Trigger check: metric_id={}, metric_name={}, value={}, matches={}, eval={:.3}ms",
-                trigger_key, metric_name, value, matches, eval_ms
+                "Trigger check: metric_name={}, value={}, matches={}, eval={:.3}ms",
+                metric_name, value, matches, eval_ms
             );
 
             if matches {

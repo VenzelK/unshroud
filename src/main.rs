@@ -10,6 +10,8 @@ mod metrics;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+#[cfg(debug_assertions)]
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -18,6 +20,7 @@ use clap::Parser;
 use crate::cli::Args;
 use crate::config::load_config;
 use crate::core::engine::{Engine, EngineConfig};
+use crate::core::state::CoreState;
 use crate::core::triggers::{Operator, Trigger};
 use crate::plugins::protocol::hash_metric_id;
 
@@ -45,6 +48,7 @@ async fn main() -> ExitCode {
         loop { collector.collect(); tokio::time::sleep(std::time::Duration::from_secs(1)).await; }
     });
 
+
     if let Err(e) = run().await {
         error_log!("startup FAILED: {}", e);
         return ExitCode::FAILURE;
@@ -63,18 +67,28 @@ async fn run() -> anyhow::Result<()> {
 
     let triggers = build_triggers_from_config(&cfg);
 
+
+
+    let start_time = std::time::Instant::now();
+    let dump_dir = cfg.core.output_dir.clone();
+
+    let state = Arc::new(std::sync::Mutex::new(
+            CoreState::new(cfg.core.buffer_capacity, 256)
+        ));
+
     let engine_cfg = EngineConfig {
         poll_interval_ms: cfg.core.poll_interval_ms,
-        buffer_capacity: cfg.core.buffer_capacity,
-        event_capacity: 256,
         output_dir: cfg.core.output_dir,
         triggers,
-        socket_path: cfg.core.socket_path.into(),
-        lua_triggers_dir: cfg.core.lua_triggers_dir.clone(),
+        socket_path: cfg.core.socket_path,
+        lua_triggers_dir: cfg.core.lua_triggers_dir,
     };
 
+    #[cfg(debug_assertions)]
+    spawn_debug_dumper(state.clone(), dump_dir, start_time);
+
     
-    let mut engine = Engine::new(engine_cfg)
+    let mut engine = Engine::new(engine_cfg, state)
         .context("Failed to initialize engine")?;
 
     let _ = engine.run().await;
@@ -117,6 +131,60 @@ fn build_triggers_from_config(cfg: &crate::config::types::Config) -> Vec<Trigger
     });
     triggers
 }
+
+#[cfg(debug_assertions)]
+fn spawn_debug_dumper(
+    state: Arc<std::sync::Mutex<crate::core::state::CoreState>>,
+    dump_dir: std::path::PathBuf,
+    start_time: std::time::Instant,
+) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sig = signal(SignalKind::user_defined1()).expect("Failed to bind SIGUSR1");
+
+    tokio::spawn(async move {
+        while sig.recv().await.is_some() {
+            let guard = state.lock().unwrap();
+            
+            let snapshot = serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "uptime_sec": start_time.elapsed().as_secs(),
+                "dump_timestamp": std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                "core_state": {
+                    "registered_metrics": guard.metric_names.len(),
+                    "metric_registry": guard.metric_names.clone(),
+                    "metrics_in_buffer": guard.metrics.len(),
+                    "buffer_capacity": guard.metrics.capacity(),
+                    "base_unix_time": guard.base_time,
+                    "buffer_occupancy_pct": if guard.metrics.capacity() > 0 {
+                        (guard.metrics.len() as f64 / guard.metrics.capacity() as f64 * 100.0).round()
+                    } else { 0.0 },
+                }
+            });
+            drop(guard);
+
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let path = dump_dir.join(format!("debug_state_{}.json", ts));
+            
+            match serde_json::to_string_pretty(&snapshot) {
+                Ok(json) => {
+                    if std::fs::write(&path, json).is_ok() {
+                        crate::info_log!("🐛 [DEBUG] Full state dumped to {}", path.display());
+                    } else {
+                        crate::debug_log!("🐛 [DEBUG] Failed to write state dump");
+                    }
+                }
+                Err(e) => error_log!("[DEBUG] JSON serialization error: {}", e),
+            }
+        }
+    });
+}
+
 
 #[cfg(test)]
     mod tests {

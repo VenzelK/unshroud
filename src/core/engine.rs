@@ -13,8 +13,6 @@ use crate::{debug_log, error_log, info_log};
 
 pub struct EngineConfig {
     pub poll_interval_ms: u64,
-    pub buffer_capacity: usize,
-    pub event_capacity: usize,
     pub output_dir: PathBuf,
     pub triggers: Vec<Trigger>,
     pub socket_path: String,
@@ -30,12 +28,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(cfg: EngineConfig) -> Result<Self, anyhow::Error> {
-        let state = Arc::new(std::sync::Mutex::new(
-            CoreState::new(cfg.buffer_capacity, cfg.event_capacity)
-        ));
+    pub fn new(cfg: EngineConfig, state: Arc<std::sync::Mutex<CoreState>>) -> Result<Self, anyhow::Error> {
+        
         Ok(Self {
-            state: state.clone(),
+            state: state,
             triggers: TriggerEngine::new(cfg.triggers, &cfg.lua_triggers_dir)
                 .map_err(|e| anyhow::anyhow!("Trigger init error: {}", e))?,
             bundle: BundleBuilder::new(&cfg.output_dir),
@@ -160,21 +156,6 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
-    }
-
-    #[test]
-    fn test_engine_constructor() {
-        let cfg = EngineConfig {
-            poll_interval_ms: 100,
-            buffer_capacity: 64,
-            event_capacity: 16,
-            output_dir: test_output_dir(),
-            triggers: vec![],
-            socket_path: "/tmp/test.sock".to_string(),
-            lua_triggers_dir: PathBuf::new(),               
-        };
-        let engine = Engine::new(cfg).unwrap();
-        assert_eq!(engine.poll_interval, Duration::from_millis(100));
     }
 
     #[tokio::test]

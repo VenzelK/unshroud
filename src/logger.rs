@@ -11,27 +11,27 @@ pub fn init() {
 macro_rules! debug_log {
     ($($arg:tt)*) => {
         #[cfg(debug_assertions)]
-        log::debug!($($arg)*);
+        log::debug!($($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! info_log {
     ($($arg:tt)*) => {
-        log::info!($($arg)*);
+        log::info!($($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! warn_log {
     ($($arg:tt)*) => {
-        log::warn!($($arg)*);
+        log::warn!($($arg)*)
     };
 }
 
 #[macro_export]
 macro_rules! error_log {
     ($($arg:tt)*) => {
-        log::error!($($arg)*);
+        log::error!($($arg)*)
     };
 }
